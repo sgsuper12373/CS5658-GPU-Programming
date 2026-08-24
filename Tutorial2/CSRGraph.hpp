@@ -15,7 +15,13 @@ struct CSRGraph{
     vector<double> values; 
 }; 
 
-
+/**
+ * @brief create the CSR graph from the given graph(edgelist)
+ * 
+ * @param V 
+ * @param adjList 
+ * @return CSRGraph 
+ */
 CSRGraph createCSRGraph( int V, vector<vector<pair<int,double>>>& adjList){
     CSRGraph graph; 
     graph.nodes = V; 

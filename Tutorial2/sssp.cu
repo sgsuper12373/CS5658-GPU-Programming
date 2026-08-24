@@ -9,6 +9,11 @@ using namespace std;
 // this will be used to track if some node's dist gets updated in dist array 
 __device__ int d_changed = 0; 
 
+struct DeviceCSRGraph {
+    int* row_ptr;
+    int* col_ind;
+    double* values;
+};
 
 /**
  * @brief Initilize the given array with the INT_MAX 
@@ -67,25 +72,25 @@ __device__ double atomicMinDouble(double* address, double val)
  * @param N 
  * @return __global__ 
  */
-__global__ void relaxdist(CSRGraph* G, double* dist, int N)
+__global__ void relaxdist(DeviceCSRGraph G, double* dist, int N)
 {
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
     if (tid >= N || dist[tid] == INT_MAX)
         return;
 
-    for (int i = G->row_ptr[tid];
-         i < G->row_ptr[tid + 1];
+    for (int i = G.row_ptr[tid];
+         i < G.row_ptr[tid + 1];
          i++)
     {
-        int v = G->col_ind[i];
+        int v = G.col_ind[i];
 
-        double newDist = dist[tid] + G->values[i];
+        double newDist = dist[tid] + G.values[i];
 
         double oldDist = atomicMinDouble(&dist[v], newDist);
 
         if (newDist < oldDist)
-            d_changed = 1;
+            atomicExch(&d_changed, 1);
     }
 }
 
@@ -99,7 +104,7 @@ void usage(){
 }
 
 int main( int argc, char** argv ) {
-    if( argc < 2 ){
+    if( argc < 4 ){
         usage(); 
         return 0;
     }
@@ -116,17 +121,51 @@ int main( int argc, char** argv ) {
     int NUM_BLOCK = (G.nodes + TPB - 1 )/ TPB; 
     // devide dist initilization
     double * d_dist; 
-    cudaMalloc(&d_dist,G.nodes*sizeof(double)); 
+     CUDA_CHECK(cudaMalloc(&d_dist,G.nodes*sizeof(double))); 
     dist_init<<<NUM_BLOCK,TPB>>>(d_dist,G.nodes); 
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK( cudaDeviceSynchronize()); 
 
-    int h_changed = 0 ; 
-    while( !h_changed ){
+    // Copy the CSR arrays to device memory.  The host-side vectors cannot be
+    // dereferenced by the GPU.
+    int *d_row_ptr, *d_col_ind;
+    double *d_values;
+    CUDA_CHECK(cudaMalloc(&d_row_ptr, (G.nodes + 1) * sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_col_ind, G.edges * sizeof(int)));
+    CUDA_CHECK(cudaMalloc(&d_values, G.edges * sizeof(double)));
+    CUDA_CHECK(cudaMemcpy(d_row_ptr, G.row_ptr.data(), (G.nodes + 1) * sizeof(int), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_col_ind, G.col_ind.data(), G.edges * sizeof(int), cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_values, G.values.data(), G.edges * sizeof(double), cudaMemcpyHostToDevice));
+
+    DeviceCSRGraph d_G{d_row_ptr, d_col_ind, d_values};
+    double source_dist = 0.0;
+    CUDA_CHECK(cudaMemcpy(d_dist + src, &source_dist, sizeof(double), cudaMemcpyHostToDevice));
+
+
+    cout << "TPB: " << TPB << "\nNUM_BLOCKS: " << NUM_BLOCK << "\n\n"; 
+ 
+    int h_changed = 1;
+    while( h_changed ){
         // reset the d_changed to 0  
-        cudaMemcpyToSymbol(d_changed,&h_changed,sizeof(int)); 
+        h_changed = 0;
+        CUDA_CHECK(cudaMemcpyToSymbol(d_changed, &h_changed, sizeof(int)));
+        relaxdist<<<NUM_BLOCK,TPB>>>(d_G, d_dist, G.nodes);
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaMemcpyFromSymbol(&h_changed, d_changed, sizeof(int)));
 
     }
+
+    CUDA_CHECK(cudaMemcpy(h_dist.data(), d_dist, G.nodes * sizeof(double), cudaMemcpyDeviceToHost));
+
+    for( int i = 0; i < h_dist.size(); i++ ){
+        cout << "Node: " << i << h_dist[i] << "\n"; 
+    }
+
+
+    CUDA_CHECK(cudaFree(d_values));
+    CUDA_CHECK(cudaFree(d_col_ind));
+    CUDA_CHECK(cudaFree(d_row_ptr));
+    CUDA_CHECK(cudaFree(d_dist));
 
 
     return 0 ; 
