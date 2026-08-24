@@ -19,13 +19,14 @@ struct CSRGraph{
 CSRGraph createCSRGraph( int V, vector<vector<pair<int,double>>>& adjList){
     CSRGraph graph; 
     graph.nodes = V; 
-    graph.edges = adjList.size(); 
+    graph.edges = 0;
     graph.row_ptr.resize(V+1,0);
 
     // the row_ptr array is nothing but the prefix sum of number of edges in each row. 
     for( int i = 0 ; i < V; i++ ){
         graph.row_ptr[i+1] = graph.row_ptr[i] + adjList[i].size();
     }
+    graph.edges = graph.row_ptr[V];
 
     graph.col_ind.resize(graph.edges);
     graph.values.resize(graph.edges); 
