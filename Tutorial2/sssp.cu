@@ -90,7 +90,7 @@ __global__ void relaxdist(DeviceCSRGraph G, double* dist, int N)
         double oldDist = atomicMinDouble(&dist[v], newDist);
 
         if (newDist < oldDist)
-            atomicExch(&d_changed, 1);
+            d_changed = 1 ;
     }
 }
 
@@ -121,7 +121,7 @@ int main( int argc, char** argv ) {
     int NUM_BLOCK = (G.nodes + TPB - 1 )/ TPB; 
     // devide dist initilization
     double * d_dist; 
-     CUDA_CHECK(cudaMalloc(&d_dist,G.nodes*sizeof(double))); 
+    CUDA_CHECK(cudaMalloc(&d_dist,G.nodes*sizeof(double))); 
     dist_init<<<NUM_BLOCK,TPB>>>(d_dist,G.nodes); 
     CUDA_CHECK(cudaGetLastError());
     CUDA_CHECK( cudaDeviceSynchronize()); 
