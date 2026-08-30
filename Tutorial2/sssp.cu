@@ -95,7 +95,10 @@ __global__ void relaxdist(DeviceCSRGraph G, double* dist, int N)
 }
 
 
-
+/**
+ * @brief Print how to use program 
+ * 
+ */
 void usage(){
     cout << "Usage: ./a.out <input_file> <src> <ThreadsPerBlock" << "\n"; 
     for( int i = 0 ; i < 100;i++ ) cout << "-*-"; 
@@ -145,7 +148,8 @@ int main( int argc, char** argv ) {
     cout << "TPB: " << TPB << "\nNUM_BLOCKS: " << NUM_BLOCK << "\n\n"; 
  
     int h_changed = 1;
-    while( h_changed ){
+    // using the for loop with n-1 iteration instead of while to avoid infinite loop if -ve weight cycle present 
+    for( int i = 0 ; i < G.nodes-1 && h_changed; i++ ) {
         // reset the d_changed to 0  
         h_changed = 0;
         CUDA_CHECK(cudaMemcpyToSymbol(d_changed, &h_changed, sizeof(int)));

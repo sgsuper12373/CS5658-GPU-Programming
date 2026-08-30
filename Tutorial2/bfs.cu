@@ -33,7 +33,32 @@ __global__ void dist_init( int* dist, int N ){
 }
 
 
+__device__ bool d_changed = false; 
 
+__global__ void BFS( int* dist, DeviceCSRGraph g, int N ) {
+	
+	// push BFS 
+	// get the global thread id 
+	int tid = blockIdx.x* blockDim.x + threadIdx.x; 
+	if( tid >= N || dist[tid] == INT_MAX) return ; 
+
+	// find the neighbours and push the distance (minimum distance should be pushed) 
+    for( int i = g.row_ptr[tid] ; i < g.row_ptr[tid+1] ; i++ ){
+        
+        int neighbor = g.col_ind[i];
+        int new_dist = dist[tid] + 1;
+        
+        // atomicMin updates memory and returns the OLD value
+        int old_dist = atomicMin(&dist[neighbor], new_dist); 
+        
+        // If the new distance is smaller than the old distance, a change was made
+        if( new_dist < old_dist ){
+            d_changed = true; 
+        }
+    }
+	
+	
+}
 
 void printUsage(){
     cout << "Usage: ./a.out <input_file> <src> <TPB>  "; 
@@ -76,9 +101,10 @@ int main( int argc, char** argv){
     CUDA_CHECK( cudaMalloc(&d_row_ptr, (G.nodes + 1)* sizeof(int))); 
     CUDA_CHECK( cudaMalloc(&d_col_idx, (G.edges)* sizeof(int))); 
     CUDA_CHECK( cudaMalloc(&d_values,  (G.edges)* sizeof(double))); 
-    CUDA_CHECK( cudaMemcpy(&d_row_ptr, G.row_ptr.data(), G.nodes*sizeof(int), cudaMemcpyHostToDevice));
-    CUDA_CHECK( cudaMemcpy(&d_col_idx, G.col_ind.data(), G.nodes*sizeof(int), cudaMemcpyHostToDevice));
-    CUDA_CHECK( cudaMemcpy(&d_values, G.values.data(), G.nodes*sizeof(double), cudaMemcpyHostToDevice)); 
+
+    CUDA_CHECK( cudaMemcpy(d_row_ptr, G.row_ptr.data(), (G.nodes+1)*sizeof(int), cudaMemcpyHostToDevice));
+    CUDA_CHECK( cudaMemcpy(d_col_idx, G.col_ind.data(), G.edges*sizeof(int), cudaMemcpyHostToDevice));
+    CUDA_CHECK( cudaMemcpy(d_values, G.values.data(), G.edges*sizeof(double), cudaMemcpyHostToDevice)); 
     DeviceCSRGraph d_G{d_row_ptr,d_col_idx,d_values}; 
 
     int source_dist = 0;
@@ -86,10 +112,26 @@ int main( int argc, char** argv){
 
     cout << "TPB: " << TPB << "\nNUM_BLOCKS: " << NUM_BLOCK << "\n\n"; 
 
-    
+    bool h_changed = true; 
+
+    while( h_changed ) {
+	h_changed = false; 
+	CUDA_CHECK(cudaMemcpyToSymbol(d_changed,&h_changed, sizeof(bool))); 
+	BFS<<<NUM_BLOCK, TPB>>>(d_dist,d_G,G.nodes); 
+	CUDA_CHECK(cudaGetLastError()); 
+	CUDA_CHECK(cudaMemcpyFromSymbol(&h_changed,d_changed,sizeof(bool))); 
+	
+    }
+
+    CUDA_CHECK( cudaMemcpy(h_dist.data(), d_dist, G.nodes*sizeof(int),cudaMemcpyDeviceToHost)); 
 
    
-    
+    for( int i = 0 ; i < h_dist.size(); i++ ) cout << "Node : " << i << " -> " << h_dist[i] << "\n"; 
+
+    CUDA_CHECK(cudaFree(d_values)); 
+    CUDA_CHECK(cudaFree(d_col_idx)); 
+    CUDA_CHECK(cudaFree(d_row_ptr)); 
+    CUDA_CHECK(cudaFree(d_dist));
 
 
     return  0; 
